@@ -35,15 +35,13 @@ jobs:
       - name: Download AWS IP ranges
         run: curl -fsSL https://ip-ranges.amazonaws.com/ip-ranges.json -o ip-ranges.json
 
-      - name: Generate ruleset (AMAZON)
+      - name: Generate ruleset
         run: |
-          jq -r '.prefixes[] | select(.service=="AMAZON") | .ip_prefix' ip-ranges.json \
-            | awk '{print "IP-CIDR," $1 ",no-resolve"}' > amazon.ruleset
+          jq -r '.prefixes[] | select(.service == "AMAZON") | .ip_prefix' ip-ranges.json > amazon.ruleset
 
-      - name: Convert to .mrs
+      - name: Convert to .mrs with Mihomo
         run: |
           ./mihomo convert-ruleset ipcidr text amazon.ruleset amazon-aws.mrs
-          ls -lh amazon-aws.mrs
 
       - name: Create GitHub Release with MRS
         env:

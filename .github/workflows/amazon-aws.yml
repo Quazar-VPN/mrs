@@ -1,73 +1,56 @@
+# .github/workflows/aws-ip-ranges.yml
 name: Generate AWS MRS
 
 on:
   schedule:
-    - cron: '0 */12 * * *'  # every 12 hours
+    - cron: '0 */12 * * *'   # every 12 hours
   workflow_dispatch:
 
 permissions:
   contents: write
-  packages: write
-
+  
 jobs:
   generate:
     runs-on: ubuntu-latest
-    env:
-      REPO_API: https://api.github.com/repos/MetaCubeX/mihomo/releases/latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install required CLI tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y curl jq gzip gnupg lsb-release
-          type -p gh >/dev/null || \
-            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-              | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] \
-              https://cli.github.com/packages stable main" \
-              | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-            sudo apt-get update -qq && sudo apt-get install -y gh
-          gh --version
+      - name: Install tooling
+        run: sudo apt-get update && sudo apt-get install -y curl jq gzip
 
-      - name: Download latest Mihomo (Linux amd64)
-        shell: bash -euo pipefail
+      - name: Download latest Mihomo (Linux amd64) and make executable
+        env:
+          REPO_API: https://api.github.com/repos/MetaCubeX/mihomo/releases/latest
         run: |
           asset_url=$(curl -fsSL "$REPO_API" \
-            | jq -r '.assets[] | select(.name|test("^mihomo-linux-amd64.+\\.gz$")) | .browser_download_url' \
-            | head -n1)
-          if [[ -z "$asset_url" ]]; then
-            echo "::error::Failed to find Mihomo asset"; exit 1
-          fi
+            | jq -r '.assets[]
+                     | select(.name | test("mihomo-linux-amd64.*\\.gz$"))
+                     | .browser_download_url' \
+            | head -n 1)
           echo "Downloading $asset_url"
-          curl -fsSL "$asset_url" -o mihomo.gz
+          curl -L -o mihomo.gz "$asset_url"
           gunzip -c mihomo.gz > mihomo
           chmod +x mihomo
           ./mihomo -v
 
-      - name: Download AWS ip-ranges.json
+      - name: Download AWS IP ranges
         run: curl -fsSL https://ip-ranges.amazonaws.com/ip-ranges.json -o ip-ranges.json
 
-      - name: Generate full ruleset (IPv4 + IPv6)
+      - name: Generate ruleset
         run: |
-          jq -r '
-            (.prefixes[]?.ip_prefix),
-            (.ipv6_prefixes[]?.ipv6_prefix)
-          ' ip-ranges.json > aws.ruleset
-          echo "Lines in ruleset: $(wc -l < aws.ruleset)"
+          jq -r '.prefixes[] | select(.service == "AMAZON") | .ip_prefix' ip-ranges.json > amazon.ruleset
 
-      - name: Convert to .mrs via Mihomo
-        run: ./mihomo convert-ruleset ipcidr text aws.ruleset aws.mrs
+      - name: Convert to .mrs with Mihomo
+        run: |
+          ./mihomo convert-ruleset ipcidr text amazon.ruleset amazon-aws.mrs
 
-      - name: Create GitHub release with full .mrs
+      - name: Create GitHub Release with MRS
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ts=$(date +%s)
-          gh release create "aws-$ts" \
-            aws.mrs \
+          gh release create "aws-$ts" amazon-aws.mrs \
             --title "AWS IP ranges $ts" \
-            --notes "Automatically generated from ip-ranges.json (ALL services) every 12 hours" \
-            --target "$GITHUB_SHA" \
-            --verify-tag
+            --notes "Automatically generated every 12 hours from https://ip-ranges.amazonaws.com/ip-ranges.json"

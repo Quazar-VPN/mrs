@@ -1,8 +1,9 @@
+# .github/workflows/aws-ip-ranges.yml
 name: Generate AWS MRS
 
 on:
   schedule:
-    - cron: '0 */12 * * *'  # every 12 hours
+    - cron: '0 */12 * * *'   # every 12 hours
   workflow_dispatch:
 
 jobs:
@@ -13,36 +14,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y curl jq unzip
+      - name: Install tooling
+        run: sudo apt-get update && sudo apt-get install -y curl jq gzip
 
-      - name: Download AWS IP Ranges
+      - name: Download latest Mihomo (Linux amd64) and make executable
+        env:
+          REPO_API: https://api.github.com/repos/MetaCubeX/mihomo/releases/latest
         run: |
-          curl -sS https://ip-ranges.amazonaws.com/ip-ranges.json -o ip-ranges.json
+          asset_url=$(curl -fsSL "$REPO_API" \
+            | jq -r '.assets[]
+                     | select(.name | test("mihomo-linux-amd64.*\\.gz$"))
+                     | .browser_download_url' \
+            | head -n 1)
+          echo "Downloading $asset_url"
+          curl -L -o mihomo.gz "$asset_url"
+          gunzip -c mihomo.gz > mihomo
+          chmod +x mihomo
+          ./mihomo -v
 
-      - name: Extract AMAZON IPs to ruleset
+      - name: Download AWS IP ranges
+        run: curl -fsSL https://ip-ranges.amazonaws.com/ip-ranges.json -o ip-ranges.json
+
+      - name: Generate ruleset
         run: |
-          jq -r '.prefixes[] | select(.service == "AMAZON") | .ip_prefix' ip-ranges.json \
-          | awk '{print "IP-CIDR," $1 ",no-resolve"}' > amazon.ruleset
+          jq -r '.prefixes[] | select(.service == "AMAZON") | .ip_prefix' ip-ranges.json > amazon.ruleset
 
-      - name: Download latest Mihomo release and extract convert-ruleset
+      - name: Convert to .mrs with Mihomo
         run: |
-          LATEST_URL=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
-            | jq -r '.assets[] | select(.name | test("linux-amd64.zip$")) | .browser_download_url')
-
-          curl -L -o mihomo.zip "$LATEST_URL"
-          unzip mihomo.zip -d mihomo-bin
-          chmod +x mihomo-bin/convert-ruleset
-
-      - name: Convert ruleset to .mrs
-        run: |
-          ./mihomo-bin/convert-ruleset -i amazon.ruleset -f clash-meta -o amazon-aws.mrs
+          ./mihomo convert-ruleset ipcidr text amazon.ruleset amazon-aws.mrs
 
       - name: Create GitHub Release with MRS
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TS=$(date +%s)
-          gh release create "aws-$TS" amazon-aws.mrs \
-            --title "AWS IP Ranges $TS" \
-            --notes "Generated from AWS IP JSON and converted to .mrs format using mihomo."
+          ts=$(date +%s)
+          gh release create "aws-$ts" amazon-aws.mrs \
+            --title "AWS IP ranges $ts" \
+            --notes "Automatically generated every 12 hours from https://ip-ranges.amazonaws.com/ip-ranges.json"

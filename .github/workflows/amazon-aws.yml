@@ -3,7 +3,7 @@ name: Generate AWS MRS
 
 on:
   schedule:
-    - cron: '0 */12 * * *'   # every 12 h
+    - cron: '0 */12 * * *'   # every 12 hours
   workflow_dispatch:
 
 jobs:
@@ -11,13 +11,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout (keep history tidy, not strictly needed but good practice)
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install tooling
         run: sudo apt-get update && sudo apt-get install -y curl jq gzip
 
-      - name: Download latest Mihomo (Linux amd64) and make it executable
+      - name: Download latest Mihomo (Linux amd64) and make executable
         env:
           REPO_API: https://api.github.com/repos/MetaCubeX/mihomo/releases/latest
         run: |
@@ -30,27 +30,26 @@ jobs:
           curl -L -o mihomo.gz "$asset_url"
           gunzip -c mihomo.gz > mihomo
           chmod +x mihomo
-          ./mihomo -v   # sanity check
+          ./mihomo -v
 
-      - name: Download AWS IP ranges JSON
+      - name: Download AWS IP ranges
         run: curl -fsSL https://ip-ranges.amazonaws.com/ip-ranges.json -o ip-ranges.json
 
-      - name: Build ruleset (AMAZON service only)
+      - name: Generate ruleset (AMAZON)
         run: |
           jq -r '.prefixes[] | select(.service=="AMAZON") | .ip_prefix' ip-ranges.json \
             | awk '{print "IP-CIDR," $1 ",no-resolve"}' > amazon.ruleset
-          echo "Ruleset lines: $(wc -l < amazon.ruleset)"
 
-      - name: Convert to .mrs with Mihomo
+      - name: Convert to .mrs
         run: |
-          ./mihomo convert-ruleset -i amazon.ruleset -o amazon-aws.mrs
+          ./mihomo convert-ruleset ipcidr text amazon.ruleset amazon-aws.mrs
           ls -lh amazon-aws.mrs
 
-      - name: Create release and upload amazon‑aws.mrs
+      - name: Create GitHub Release with MRS
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ts=$(date +%s)
           gh release create "aws-$ts" amazon-aws.mrs \
             --title "AWS IP ranges $ts" \
-            --notes "Automated build: AWS AMAZON prefixes → amazon-aws.mrs (generated every 12 h)."
+            --notes "Automatically generated every 12 hours from https://ip-ranges.amazonaws.com/ip-ranges.json"

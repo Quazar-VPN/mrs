@@ -40,7 +40,7 @@ jobs:
 
       - name: Generate ruleset
         run: |
-          jq -r '.prefixes[] | select(.service == "AMAZON") | .ip_prefix' ip-ranges.json > amazon.ruleset
+          jq -r '.prefixes[] | .ip_prefix' ip-ranges.json > amazon.ruleset
 
       - name: Convert to .mrs with Mihomo
         run: |

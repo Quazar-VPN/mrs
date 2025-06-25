@@ -3,7 +3,7 @@ name: Generate AWS MRS
 
 on:
   schedule:
-    - cron: '0 */12 * * *'   # every 12 hours
+    - cron: '0 */24 * * *'   # every 24 hours
   workflow_dispatch:
 
 permissions:
